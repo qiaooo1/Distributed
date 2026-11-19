@@ -1,0 +1,158 @@
+name: joblab
+
+x-java: &java
+  init: true
+  mem_limit: 640m
+  healthcheck:
+    test:
+      - CMD
+      - bash
+      - -ec
+      - |
+        exec 3<>/dev/tcp/127.0.0.1/$$HEALTH_PORT
+        printf 'GET %s HTTP/1.0\r\nHost: localhost\r\n\r\n' "$${HEALTH_PATH:-/actuator/health}" >&3
+        read -r status <&3
+        [[ "$$status" == *" 200 "* ]]
+    interval: 5s
+    timeout: 4s
+    retries: 25
+
+x-shared-env: &shared-env
+  JAVA_TOOL_OPTIONS: -XX:ActiveProcessorCount=2
+  DISCOVERY_URL: http://discovery:8761/eureka/
+  REDIS_HOST: redis
+  RABBIT_HOST: rabbitmq
+  RABBIT_USER: joblab
+  RABBIT_PASSWORD: rabbit_local
+  INTERNAL_KEY: ${INTERNAL_KEY:-joblab-local-internal-key}
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root_local
+      TZ: UTC
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./infra/mysql/01-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --protocol=tcp -h 127.0.0.1 -uscheduler_app -pscheduler_local scheduler_lab -Nse 'SELECT 1'"]
+      interval: 5s
+      timeout: 4s
+      retries: 25
+      start_period: 12s
+
+  redis:
+    image: redis:7.4-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: joblab
+      RABBITMQ_DEFAULT_PASS: rabbit_local
+    ports:
+      - "127.0.0.1:${RABBIT_UI_PORT:-15683}:15672"
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq
+    hostname: joblab-rabbit
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 8s
+      timeout: 6s
+      retries: 20
+      start_period: 12s
+
+  discovery:
+    <<: *java
+    build:
+      context: .
+      args:
+        SERVICE: discovery-service
+    environment:
+      HEALTH_PORT: 8761
+      JAVA_TOOL_OPTIONS: -XX:ActiveProcessorCount=2
+    ports:
+      - "127.0.0.1:${DISCOVERY_PORT:-18761}:8761"
+
+  scheduler:
+    <<: *java
+    build:
+      context: .
+      args:
+        SERVICE: scheduler-service
+    environment:
+      <<: *shared-env
+      HEALTH_PORT: 8081
+      HEALTH_PATH: /actuator/health/readiness
+      JDBC_URL: jdbc:mysql://mysql:3306/scheduler_lab?connectionTimeZone=UTC
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-12}
+      JOB_QUEUE_TIMEOUT_SECONDS: ${JOB_QUEUE_TIMEOUT_SECONDS:-30}
+      JOB_MISFIRE_SECONDS: ${JOB_MISFIRE_SECONDS:-30}
+      JOBLAB_DEMO_ACCOUNTS: ${JOBLAB_DEMO_ACCOUNTS:-true}
+      JOBLAB_JWT_SECRET_B64: ${JOBLAB_JWT_SECRET_B64:-am9ibGFiLWxvY2FsLWRlbW8ta2V5LW11c3QtYmUtY2hhbmdlZA==}
+      JOBLAB_BOOTSTRAP_ADMIN_PASSWORD: ${JOBLAB_BOOTSTRAP_ADMIN_PASSWORD:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      discovery:
+        condition: service_healthy
+
+  worker:
+    <<: *java
+    build:
+      context: .
+      args:
+        SERVICE: worker-service
+    environment:
+      <<: *shared-env
+      HEALTH_PORT: 8082
+      JDBC_URL: jdbc:mysql://mysql:3306/report_lab?connectionTimeZone=UTC
+      REPORT_MIN_RUNTIME_MS: ${REPORT_MIN_RUNTIME_MS:-0}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      scheduler:
+        condition: service_healthy
+
+  gateway:
+    <<: *java
+    build:
+      context: .
+      args:
+        SERVICE: gateway-service
+    environment:
+      <<: *shared-env
+      HEALTH_PORT: 8080
+      JOB_RATE_LIMIT: ${JOB_RATE_LIMIT:-60}
+      JOB_LOGIN_RATE_LIMIT: ${JOB_LOGIN_RATE_LIMIT:-30}
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-18080}:8080"
+    depends_on:
+      discovery:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-19090}:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+volumes:
+  mysql-data:
+  rabbit-data:
+  prometheus-data:

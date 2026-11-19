@@ -1,0 +1,62 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: scheduler-service
+  datasource:
+    url: ${JDBC_URL:jdbc:mysql://localhost:3306/scheduler_lab?connectionTimeZone=UTC}
+    username: ${JDBC_USER:scheduler_app}
+    password: ${JDBC_PASSWORD:scheduler_local}
+    hikari:
+      maximum-pool-size: 10
+  mvc:
+    problemdetails:
+      enabled: true
+  rabbitmq:
+    host: ${RABBIT_HOST:localhost}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:joblab}
+    password: ${RABBIT_PASSWORD:rabbit_local}
+    connection-timeout: 1500ms
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+  task:
+    scheduling:
+      pool:
+        size: 4
+eureka:
+  client:
+    service-url:
+      defaultZone: ${DISCOVERY_URL:http://localhost:8761/eureka/}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 15
+    instance-id: ${spring.application.name}:${HOSTNAME:${random.uuid}}:${server.port}
+
+joblab:
+  internal-key: ${INTERNAL_KEY:joblab-local-internal-key}
+  lease-seconds: ${JOB_LEASE_SECONDS:12}
+  queue-timeout-seconds: ${JOB_QUEUE_TIMEOUT_SECONDS:30}
+  schedule-misfire-seconds: ${JOB_MISFIRE_SECONDS:30}
+  security:
+    jwt-key: ${JOBLAB_JWT_SECRET_B64:}
+    demo-accounts: ${JOBLAB_DEMO_ACCOUNTS:false}
+    bootstrap-password: ${JOBLAB_BOOTSTRAP_ADMIN_PASSWORD:}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

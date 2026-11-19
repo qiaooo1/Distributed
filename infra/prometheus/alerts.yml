@@ -1,0 +1,24 @@
+groups:
+  - name: joblab
+    rules:
+      - alert: JobLabOutboxDeliveryDelayed
+        expr: max(joblab_outbox_oldest_seconds{job="joblab-scheduler"}) > 120
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Oldest unpublished outbox event has waited more than two minutes
+      - alert: JobLabExpiredLeasesStuck
+        expr: max(joblab_leases_expired{job="joblab-scheduler"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Expired execution leases are not being recovered
+      - alert: JobLabScrapeTargetDown
+        expr: up{job=~"joblab-.+"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: A discovered JobLab metrics target cannot be scraped

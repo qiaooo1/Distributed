@@ -1,0 +1,57 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: worker-service
+  datasource:
+    url: ${JDBC_URL:jdbc:mysql://localhost:3306/report_lab?connectionTimeZone=UTC}
+    username: ${JDBC_USER:report_app}
+    password: ${JDBC_PASSWORD:report_local}
+    hikari:
+      maximum-pool-size: 10
+  mvc:
+    problemdetails:
+      enabled: true
+  rabbitmq:
+    host: ${RABBIT_HOST:localhost}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:joblab}
+    password: ${RABBIT_PASSWORD:rabbit_local}
+    connection-timeout: 1500ms
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        concurrency: 2
+        prefetch: 1
+        retry:
+          enabled: true
+          max-attempts: 4
+          initial-interval: 500ms
+          multiplier: 2
+          max-interval: 3s
+  cloud:
+    loadbalancer:
+      cache:
+        enabled: false
+eureka:
+  client:
+    service-url:
+      defaultZone: ${DISCOVERY_URL:http://localhost:8761/eureka/}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 15
+    instance-id: ${spring.application.name}:${HOSTNAME:${random.uuid}}:${server.port}
+
+joblab:
+  internal-key: ${INTERNAL_KEY:joblab-local-internal-key}
+  report-min-runtime-ms: ${REPORT_MIN_RUNTIME_MS:0}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
