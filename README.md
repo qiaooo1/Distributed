@@ -1,87 +1,106 @@
-# JobLab 多租户分布式任务调度平台
+# JobLab · 多租户分布式任务调度平台
 
-JobLab 提供按租户隔离的任务提交、Cron 调度、并发配额和执行审计。示例业务是销售报表导出。运营人员可以安排日报和补跑失败任务，租户管理员可以管理成员和查看审计，Worker 可以独立扩容。
+JobLab 是一个 Java 后端任务平台，用销售报表导出展示完整的异步执行链路。运营人员可以即时提交、延迟执行或按 Cron 生成报表。多个调度实例和 Worker 可以并行运行，平台负责租户隔离、并发配额、故障恢复和执行审计。
 
-| 服务 | 职责 |
-| --- | --- |
-| gateway-service | Spring Cloud Gateway 公共入口，经 Eureka 查找 Scheduler。使用 Redis Lua 对登录和任务提交限流 |
-| discovery-service | Eureka 服务注册与发现 |
-| scheduler-service | Spring Security JWT、租户授权、周期调度、任务状态、Outbox、执行租约、审计与结果 |
-| worker-service | RabbitMQ 竞争消费，调用 Scheduler 领取和续租，从独立 MySQL schema 读取销售数据并生成 CSV |
-| messaging-core | 内部 API 数据结构、RabbitMQ 拓扑和发布确认 |
+**技术栈**　Java 17、Spring Boot 3.5、Spring Cloud Gateway、Eureka、Spring Security、MySQL、Redis、RabbitMQ、Flyway、Prometheus。
 
-运行栈使用 Java 17、Spring Boot 3.5、Spring Cloud 2025.0、MySQL 8.4、Redis 7.4、RabbitMQ 4、Flyway 和 Docker Compose。可选 Prometheus 监控。
+[快速启动](#快速启动) · [关键设计](#关键设计) · [API 文档](docs/api.md) · [架构与运维](docs/architecture.md) · [面试讲解](docs/interview.md)
 
-## 本地启动
+## 系统架构
 
-~~~powershell
-Set-Location 'G:\java - java'
+```mermaid
+flowchart LR
+    Client[API 客户端] --> Gateway[Gateway]
+    Gateway -->|登录与提交限流| Redis[(Redis)]
+    Gateway --> Scheduler[Scheduler 多实例]
+    Eureka[Eureka] -.-> Gateway
+    Eureka -.-> Worker[Worker 多实例]
+    Scheduler -->|任务、租约、Outbox、审计| Jobs[(MySQL 调度库)]
+    Scheduler -->|发布并等待确认| MQ[RabbitMQ]
+    MQ -->|竞争消费| Worker
+    Worker -->|领取、续租、提交结果| Scheduler
+    Worker -->|按租户查询| Sales[(MySQL 报表库)]
+```
+
+应用服务独立部署。Scheduler 持有任务状态和结果，Worker 按领取响应中的租户 ID 读取报表库。Redis 负责入口限流，任务归属和执行状态以 MySQL 为准。
+
+## 关键设计
+
+| 问题 | 实现 | 代码入口 |
+| --- | --- | --- |
+| 重复提交与越权访问 | 用 `tenant_id + request_key` 保证租户内幂等，用请求摘要识别同键异参。JWT 关联当前账号与权限版本，任务和报表查询都带租户条件 | [JobService](scheduler-service/src/main/java/io/joblab/scheduler/JobService.java) · [SecurityConfiguration](scheduler-service/src/main/java/io/joblab/scheduler/security/SecurityConfiguration.java) |
+| 多个 Scheduler 如何分派任务 | 使用 MySQL `FOR UPDATE SKIP LOCKED` 竞争到期记录。任务状态变更和 Outbox 写入同事务，发布器检查 RabbitMQ Confirm 和不可路由返回，并对失败事件退避重试 | [JobRepository](scheduler-service/src/main/java/io/joblab/scheduler/JobRepository.java) · [OutboxRelay](messaging-core/src/main/java/io/joblab/messaging/OutboxRelay.java) |
+| Worker 宕机或迟到回写 | Worker 按投递代次领取任务，获得短期租约和执行令牌。同租户的领取由租户行锁保护，达到配额时任务延后调度。续租与回写都校验令牌和到期时间，租约过期后由调度端恢复 | [JobService](scheduler-service/src/main/java/io/joblab/scheduler/JobService.java) · [JobWorker](worker-service/src/main/java/io/joblab/worker/JobWorker.java) |
+| 停机后周期任务怎么恢复 | Cron 表达式和 IANA 时区持久化。规则支持错过后跳过或补跑一次，以及上一轮仍活跃时跳过本轮。触发时刻和规则 ID 组成唯一键 | [ScheduleService](scheduler-service/src/main/java/io/joblab/scheduler/ScheduleService.java) · [Flyway 迁移](scheduler-service/src/main/resources/db/migration/V3__tenant_security_and_schedules.sql) |
+
+一次任务从 `SCHEDULED` 进入 `QUEUED`、`RUNNING`，成功后可下载 CSV。遇到超时或执行失败时，调度端按尝试次数退避。达到上限后，运营可创建关联原任务的重放记录。消息允许重复投递，调度端通过投递代次和租约使结果提交保持幂等。
+
+## 快速启动
+
+准备 Java 17、Maven 和 Docker Compose，在仓库根目录执行以下命令。
+
+```powershell
 mvn -B -ntp verify
 docker compose up -d --build --scale worker=2 --wait
-docker compose ps
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-enterprise.ps1
-~~~
+```
 
-| 本机地址 | 用途 |
+| 本机入口 | 用途 |
 | --- | --- |
-| http://127.0.0.1:18080 | API 网关 |
-| http://127.0.0.1:18761 | Eureka 注册实例 |
-| http://127.0.0.1:15683 | RabbitMQ 管理台。演示账户 joblab / rabbit_local |
-| http://127.0.0.1:19090 | Prometheus。启用 observability profile 后可用 |
+| `http://127.0.0.1:18080` | API 网关 |
+| `http://127.0.0.1:18761` | Eureka 实例列表 |
+| `http://127.0.0.1:15683` | RabbitMQ 管理台，演示用户 `joblab`，密码 `rabbit_local` |
 
-默认 Compose 使用两个独立 MySQL schema 和账号。可以加上 --scale scheduler=2 运行双调度实例。由 1.x 升级时先执行 `docker compose stop scheduler worker`。Flyway 将已有任务和报表源数据归入 acme 租户，保留任务 ID、执行记录和结果。停止环境可用 `docker compose down`，数据卷会保留。
+默认演示租户 `acme` 提供 `admin`、`operator` 和 `viewer` 三种账户，`globex` 提供独立的 `admin`。演示账户密码均为 `JobLab-Demo-2026!`，随 Compose 本地环境初始化。
 
-## 登录并提交报表
+### 提交一份报表
 
-默认演示账户密码为 `JobLab-Demo-2026!`。acme 租户有 admin、operator、viewer 三种角色，globex 租户有独立 admin。可以用两套令牌验证租户隔离。
-
-~~~powershell
+```powershell
 $base = 'http://127.0.0.1:18080'
-$credentials = @{
-    tenant   = 'acme'
+$login = @{
+    tenant = 'acme'
     username = 'operator'
     password = 'JobLab-Demo-2026!'
-} | ConvertTo-Json
-$token = Invoke-RestMethod -Method Post -Uri "$base/api/auth/token" -ContentType 'application/json' -Body $credentials
+} | ConvertTo-Json -Compress
+$token = Invoke-RestMethod -Method Post -Uri "$base/api/auth/token" -ContentType 'application/json' -Body $login
 $session = @{ Authorization = "Bearer $($token.accessToken)" }
 $headers = $session + @{ 'Idempotency-Key' = [guid]::NewGuid().ToString('N') }
-$body = @{ reportType = 'DAILY_TOTALS'; fromDate = '2026-01-01'; toDate = '2026-01-03' } | ConvertTo-Json
-$job = Invoke-RestMethod -Method Post -Uri "$base/api/jobs" -Headers $headers -ContentType 'application/json' -Body $body
+$report = @{
+    reportType = 'DAILY_TOTALS'
+    fromDate = '2026-01-01'
+    toDate = '2026-01-03'
+} | ConvertTo-Json -Compress
+$job = Invoke-RestMethod -Method Post -Uri "$base/api/jobs" -Headers $headers -ContentType 'application/json' -Body $report
 Invoke-RestMethod -Uri "$base/api/jobs/$($job.id)" -Headers $session
-# 状态变为 SUCCEEDED 后下载
-Invoke-WebRequest -Uri "$base/api/jobs/$($job.id)/result" -Headers $session -OutFile report.csv
-~~~
+```
 
-| API | 角色与用途 |
-| --- | --- |
-| POST /api/auth/token | 登录并取得 15 分钟 Bearer JWT |
-| GET /api/jobs、GET /api/jobs/{id}、GET /api/jobs/{id}/result | 租户成员查询列表、尝试记录和报表 |
-| POST /api/jobs、POST /api/jobs/{id}/cancel、POST /api/jobs/{id}/replay | 管理员与运营提交、取消或人工重跑失败任务 |
-| GET /api/schedules、GET /api/schedules/{id} | 租户成员查询周期调度 |
-| POST /api/schedules、PUT /api/schedules/{id}、PUT /api/schedules/{id}/state | 管理员与运营创建、修改、暂停和恢复周期调度 |
-| GET /api/operations/overview | 租户成员查看各任务状态计数 |
-| GET /api/operations/audit | 管理员查看租户审计流 |
-| GET /api/admin/members、POST /api/admin/members、PUT /api/admin/members/{id} | 管理员查看成员、创建账户、改变角色或撤销访问 |
+状态变为 `SUCCEEDED` 后，调用 `GET /api/jobs/{id}/result` 下载 CSV。重新发送同一份请求和幂等键应返回同一个任务 ID。以 `globex` 的令牌查询该任务应得到 `404`。完整权限矩阵和字段见 [API 文档](docs/api.md)。
 
-完整字段、权限和分页规则见 [API 文档](docs/api.md)。
+## 验证与故障演示
 
-## 故障演练与监控
+- **构建与单元测试。** `mvn verify` 通过 13 个测试，覆盖租约过期、旧代次拒绝、配额退避、Cron 错过策略和 CSV 转义。
+- **真实中间件验证。** 使用 MySQL、Redis 和两个 Scheduler 验证了跨租户访问、令牌撤销、周期触发、并发配额与失败重放。并发验证将租户配额设为 2，两实例同时尝试领取 3 个任务，其中 2 个被领取，另 1 个回到待调度。
+- **Compose 演示。** [verify.ps1](scripts/verify.ps1) 检查提交、RabbitMQ 派发和 CSV 下载。[verify-enterprise.ps1](scripts/verify-enterprise.ps1) 检查角色、租户隔离、令牌撤销和审计。
 
-~~~powershell
+以下命令用于在本地演示 Worker 宕机接管。
+
+```powershell
 $env:REPORT_MIN_RUNTIME_MS = '15000'
-docker compose --profile observability up -d --build --scale worker=2 --wait
+docker compose up -d --build --scale worker=2 --wait
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo-worker-crash.ps1
-~~~
+```
 
-演练脚本终止领取任务的演示 Worker，检查另一实例在租约过期后接管，然后重新启动被终止的容器。执行历史预期包含 LEASE_EXPIRED 和 SUCCEEDED。演练结束后移除 REPORT_MIN_RUNTIME_MS 并用 Compose 重建 Worker，可恢复正常执行速度。
+脚本会停止正在执行任务的 Worker，检查执行历史是否先出现 `LEASE_EXPIRED`，再由另一台 Worker 完成同一任务。脚本结束时会尝试启动被停止的容器。清除 `REPORT_MIN_RUNTIME_MS` 并重建 Worker 可恢复默认速度。
 
-Prometheus 采集网关、调度和 Worker 的 Actuator 指标。仓库提供 Outbox 最老积压时长、过期租约和抓取失败规则。通过 `GATEWAY_PORT`、`DISCOVERY_PORT`、`RABBIT_UI_PORT` 和 `PROMETHEUS_PORT` 可以修改本机端口。
+## 仓库导航
 
-## 设计与部署
+| 路径 | 内容 |
+| --- | --- |
+| [gateway-service](gateway-service) · [discovery-service](discovery-service) | API 路由、Redis Lua 限流、Eureka |
+| [scheduler-service](scheduler-service) | 权限、周期调度、任务状态、执行租约和审计 |
+| [worker-service](worker-service) · [messaging-core](messaging-core) | RabbitMQ 消费、报表生成、消息协议和 Outbox 发布 |
+| [infra](infra) · [scripts](scripts) | MySQL 初始化、Prometheus 告警规则和演示脚本 |
+| [docs](docs) | API 契约、架构设计、运维手册和面试追问 |
 
-- [架构设计、数据边界与运维手册](docs/architecture.md)
-- [Java 面试讲稿、实现取舍与追问](docs/interview.md)
-- [权限隔离、JWT 撤销、Cron 和审计验证脚本](scripts/verify-enterprise.ps1)
-
-默认 Compose 供本机开发和演练。独立部署时设置 JOBLAB_DEMO_ACCOUNTS=false，提供独立的 JOBLAB_JWT_SECRET_B64、INTERNAL_KEY 和首次开通账户用的 JOBLAB_BOOTSTRAP_ADMIN_PASSWORD。已有演示账号的数据仍在原数据卷，独立部署应使用独立数据库。集群部署的认证与基础设施边界见架构文档。
+Compose 默认以单节点中间件运行。可通过 `--scale scheduler=2` 验证调度多实例，通过 `--profile observability` 启用 Prometheus。升级旧版本、密钥配置和生产部署边界见 [架构与运维](docs/architecture.md)。
