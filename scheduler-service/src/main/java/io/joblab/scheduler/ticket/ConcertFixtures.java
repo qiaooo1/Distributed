@@ -31,6 +31,17 @@ class ConcertFixtures implements ApplicationRunner {
         offer("ca00e512-2c61-4cee-9920-026a328ec312", NEON, "看台票", 36900, 45);
         offer("ca00e512-2c61-4cee-9920-026a328ec313", NEON, "内场票", 59900, 35);
         offer("ca00e512-2c61-4cee-9920-026a328ec321", ORBIT, "看台票", 29900, 40);
+        jdbc.update("""
+                INSERT INTO concert_merchandise (id,tenant_id,event_id,sku,label,price_fen)
+                VALUES (?,?,?,'NEON-SCARF','城市回声限定围巾',6900),
+                       (?,?,?,'NEON-PIN','城市回声徽章',2400) ON DUPLICATE KEY UPDATE id=id
+                """, "ca00e512-2c61-4cee-9920-026a328ec331", DEMO_TENANT, NEON,
+                "ca00e512-2c61-4cee-9920-026a328ec332", DEMO_TENANT, NEON);
+        jdbc.update("""
+                INSERT INTO concert_pickup_point (id,tenant_id,event_id,label)
+                VALUES (?,?,?,'东门周边取货点'),(?,?,?,'西门周边取货点') ON DUPLICATE KEY UPDATE id=id
+                """, "ca00e512-2c61-4cee-9920-026a328ec341", DEMO_TENANT, NEON,
+                "ca00e512-2c61-4cee-9920-026a328ec342", DEMO_TENANT, NEON);
     }
 
     private void event(String id, String title, String venue, String description, int saleFrom, int saleTo, int starts) {

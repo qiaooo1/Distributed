@@ -78,7 +78,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/token", "/internal/jobs/*/claim",
                                 "/internal/jobs/*/heartbeat", "/internal/jobs/*/complete").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/readiness", "/actuator/prometheus").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/tickets/events/*/reservations")
+                        .requestMatchers(HttpMethod.POST, "/api/tickets/events/*/reservations", "/api/tickets/reservations/*/payments")
                                 .hasAnyRole("ADMIN", "OPERATOR", "BUYER")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/jobs", "/api/jobs/**", "/api/schedules", "/api/schedules/**", "/api/operations/**")

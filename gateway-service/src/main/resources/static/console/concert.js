@@ -42,19 +42,21 @@ function renderOffer(offer, saleState, canBuy) {
     (canBuy ? action(buttonLabel,"ticket-buy",{value:offer.id,tone:disabled ? "secondary" : "primary",disabled}) : "") + "</div>";
 }
 
-export function ticketOrders(rows) {
+export function ticketOrders(rows, canPay) {
   const title = '<div class="panel-head"><div><h2>抢票记录</h2><p>每次成功锁票后保留 5 分钟，超时后释放库存。</p></div>' +
     action("查看场次","ticket-list",{tone:"link"}) + '</div>';
   if (!rows.length) return '<section class="panel">' + title +
     '<p class="empty">还没有抢票记录。</p></section>';
   return '<section class="panel">' + title + '<div class="table-wrap" tabindex="0" aria-label="抢票记录">' +
     '<table class="ticket-table"><thead><tr><th scope="col">场次</th><th scope="col">票档</th>' +
-    '<th scope="col">票价</th><th scope="col">状态</th><th scope="col">锁票倒计时</th></tr></thead><tbody>' +
+    '<th scope="col">票价</th><th scope="col">状态</th><th scope="col">锁票倒计时</th><th scope="col">操作</th></tr></thead><tbody>' +
     rows.map(row => {
       const status = orderStatus[row.state] ?? orderStatus.EXPIRED;
       return '<tr><td><strong class="row-title">' + escape(row.eventTitle) + '</strong><span class="row-meta mono">' +
         escape(row.id) + '</span></td><td>' + escape(row.offerLabel) + '</td><td>' + money(row.priceFen) +
-        '</td><td>' + badge(...status, true) + '</td><td>' + timer(row) + '</td></tr>';
+        '</td><td>' + badge(...status, true) + '</td><td>' + timer(row) + '</td><td>' +
+        (row.state === "PAID" ? action("查看回执","ticket-checkout",{value:row.id,tone:"ghost"}) :
+          row.state === "LOCKED" && canPay ? action("去结算","ticket-checkout",{value:row.id}) : "—") + '</td></tr>';
     }).join("") + '</tbody></table></div></section>';
 }
 

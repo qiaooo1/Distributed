@@ -47,12 +47,17 @@ function update(now) {
   save();
 }
 function available(offer) {
-  return offer.capacity - data.reservations.filter(row => row.offerId === offer.id && row.state === "LOCKED").length;
+  return offer.capacity - data.reservations.filter(row => row.offerId === offer.id && row.state !== "EXPIRED").length;
 }
 function conflict(detail) {
   return Object.assign(new Error(detail), { status:409, detail });
 }
 
+function extras(eventId) {
+  if (eventId !== "demo-neon") return {merchandise:[],pickupPoints:[]};
+  return {merchandise:[{id:"demo-scarf",label:"城市回声限定围巾",priceFen:6900},{id:"demo-pin",label:"城市回声徽章",priceFen:2400}],
+    pickupPoints:[{id:"demo-east",label:"东门周边取货点"},{id:"demo-west",label:"西门周边取货点"}]};
+}
 export function openTicketDemo(session) {
   data ??= load();
   return {
@@ -68,6 +73,40 @@ export function openTicketDemo(session) {
       update(now);
       return { serverTime:new Date(now).toISOString(), items:data.reservations.filter(row => row.username === session.username) };
     },
+    ticketCheckout: async id => {
+      const now = Date.now();
+      update(now);
+      const reservation = data.reservations.find(row => row.id === id && row.username === session.username);
+      if (!reservation) throw new Error("找不到这笔锁票。");
+      return {serverTime:new Date(now).toISOString(),reservation,...extras(reservation.eventId),payment:reservation.payment ?? null};
+    },
+    payTicket: async (id,selection,key) => {
+      const now = Date.now();
+      update(now);
+      const mine = data.reservations.filter(row => row.username === session.username);
+      const prior = mine.find(row => row.paymentKey === key);
+      if (prior) {
+        if (prior.id !== id || (prior.payment.merchandiseId || null) !== selection.merchandiseId ||
+            (prior.payment.pickupPointId || null) !== selection.pickupPointId) throw conflict("Payment key was used for a different request");
+        return prior.payment;
+      }
+      const row = mine.find(r => r.id === id);
+      if (row?.state === "PAID") throw conflict("This ticket was already paid");
+      if (row?.state !== "LOCKED") throw conflict("Ticket hold has expired");
+      const options = extras(row.eventId);
+      const merchandise = options.merchandise.find(m => m.id === selection.merchandiseId);
+      const pickup = options.pickupPoints.find(p => p.id === selection.pickupPointId);
+      if ((selection.merchandiseId || selection.pickupPointId) && (!merchandise || !pickup)) {
+        throw conflict("Merchandise or pickup point is unavailable for this concert");
+      }
+      row.state = "PAID";
+      row.paymentKey = key;
+      row.payment = {id:crypto.randomUUID(),reservationId:id,merchandiseId:merchandise?.id ?? null,pickupPointId:pickup?.id ?? null,
+        merchandiseLabel:merchandise?.label,pickupLabel:pickup?.label,ticketPriceFen:row.priceFen,
+        merchandisePriceFen:merchandise?.priceFen ?? 0,totalFen:row.priceFen+(merchandise?.priceFen ?? 0),paidAt:new Date(now).toISOString()};
+      save();
+      return row.payment;
+    },
     reserveTicket: async (eventId, offerId, key) => {
       const now = Date.now();
       update(now);
@@ -81,7 +120,7 @@ export function openTicketDemo(session) {
       const event = data.events.find(item => item.id === eventId);
       const offer = event?.offers.find(item => item.id === offerId);
       if (!event || !offer || sale(event, now) !== "ON_SALE") throw conflict("This concert is outside its ticket sale window");
-      if (mine.some(row => row.eventId === eventId && row.state === "LOCKED")) throw conflict("You already have an active reservation for this concert");
+      if (mine.some(row => row.eventId === eventId && row.state !== "EXPIRED")) throw conflict("You already have an active reservation for this concert");
       if (!available(offer)) throw conflict("This ticket tier is sold out");
       const reservation = {
         id: crypto.randomUUID(), eventId, offerId, username: session.username, key,

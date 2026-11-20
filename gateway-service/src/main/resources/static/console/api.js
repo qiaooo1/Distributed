@@ -71,6 +71,8 @@ export function openApi(session) {
   return {
     ticketEvents: () => call("/api/tickets/events"),
     ticketOrders: () => call("/api/tickets/reservations"),
+    ticketCheckout: id => call(item("/api/tickets/reservations",id) + "/checkout"),
+    payTicket: (id, body, key) => call(item("/api/tickets/reservations",id) + "/payments", {method:"POST",body,key}),
     reserveTicket: (eventId, offerId, key) => call(item("/api/tickets/events", eventId) + "/reservations",
       { method: "POST", body: { offerId }, key }),
     overview: () => call("/api/operations/overview"),

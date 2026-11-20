@@ -1,5 +1,6 @@
 import { ApiError, openApi, request } from "./api.js";
 import { action, audits, escape, jobs, layout, loginView, members, overview, pages, roles, schedules, states } from "./views.js";
+import { checkoutError, checkoutReceipt, checkoutView, updateCheckout } from "./concert-checkout.js";
 import { ticketError, ticketEvents, ticketForm, ticketOrders, updateTicketTimers } from "./concert.js";
 import { confirmDialog, dialogHead, jobDetails, jobForm, memberForm, scheduleDetails, scheduleForm } from "./forms.js";
 
@@ -164,7 +165,7 @@ async function loadPage(quiet = false) {
       const serverTime = Date.parse(response.serverTime);
       if (Number.isFinite(serverTime)) ticketClockOffset = serverTime - Date.now();
       if (view === "tickets") currentConcerts = response.events;
-      host.innerHTML = view === "tickets" ? ticketEvents(currentConcerts,canBuy()) : ticketOrders(response.items);
+      host.innerHTML = view === "tickets" ? ticketEvents(currentConcerts,canBuy()) : ticketOrders(response.items,canBuy());
       updateTicketTimers(ticketClockOffset);
       return;
     }
@@ -263,7 +264,12 @@ async function submit(form) {
       return;
     }
     let message;
-    if (form.id === "ticket-reserve-form" && modalAction && canBuy()) {
+    let payment;
+    if (form.id === "ticket-payment-form" && modalAction && canBuy()) {
+      form.dataset.key ||= idempotencyKey();
+      payment = await modalAction({merchandiseId:fields.merchandiseId || null,pickupPointId:fields.pickupPointId || null},form.dataset.key);
+      message = "模拟付款已确认。";
+    } else if (form.id === "ticket-reserve-form" && modalAction && canBuy()) {
       form.dataset.key ||= idempotencyKey();
       const result = await modalAction(form.dataset.key);
       message = result.reservation.state === "LOCKED" ? "抢票成功，已锁票 5 分钟。" : "已经找到这次抢票记录。";
@@ -284,7 +290,10 @@ async function submit(form) {
       return;
     }
     if (version !== accountVersion) return;
-    if (sequence === modalSequence) closeDialog();
+    if (sequence === modalSequence) {
+      if (payment) showModal(checkoutReceipt(payment));
+      else closeDialog();
+    }
     toast(message);
     if (form.id === "ticket-reserve-form") {
       openPage("ticket-orders",true);
@@ -298,6 +307,7 @@ async function submit(form) {
     if (version !== accountVersion) return;
     if (form.id !== "login-form" && handleExpired(error,version)) return;
     const message = form.id === "login-form" && error.status === 401 ? "登录失败，请核对租户、用户名和密码。"
+      : form.id === "ticket-payment-form" ? checkoutError(error)
       : form.id === "ticket-reserve-form" ? ticketError(error) : failure(error);
     if (form.isConnected) showFormError(form,message);
     else toast(message,true);
@@ -327,6 +337,21 @@ function confirm(actionId, value) {
       async () => { await target.replayJob(value,key); return "任务已重新提交。"; });
   }
 }
+async function showCheckout(id) {
+  if (!session) return;
+  const active = api;
+  const version = accountVersion;
+  showModal(dialogHead("订单详情") + '<p class="loading" role="status">正在加载结算信息…</p>');
+  const sequence = modalSequence;
+  try {
+    const data = await active.ticketCheckout(id);
+    if (sequence !== modalSequence || version !== accountVersion || !dialog.open) return;
+    showModal(checkoutView(data),(selection,key) => active.payTicket(id,selection,key));
+  } catch (error) {
+    if (sequence !== modalSequence || handleExpired(error,version)) return;
+    showModal(dialogHead("加载失败") + '<div class="dialog-main"><p role="alert">' + escape(failure(error)) + '</p></div>');
+  }
+}
 function click(actionId, value, button) {
   switch (actionId) {
     case "demo": enterDemo(); break;
@@ -346,6 +371,7 @@ function click(actionId, value, button) {
     }
     case "logout": logout(); break;
     case "ticket-list": openPage("tickets"); break;
+    case "ticket-checkout": showCheckout(value); break;
     case "ticket-buy": {
       const event = currentConcerts.find(item => item.offers.some(offer => offer.id === value));
       const offer = event?.offers.find(item => item.id === value);
@@ -408,6 +434,9 @@ async function runButton(button, operation) {
 document.addEventListener("click",event => {
   const button = event.target.closest("button[data-act]");
   if (button && !button.disabled) click(button.dataset.act,button.dataset.value,button);
+});
+document.addEventListener("change",event => {
+  if (event.target.form?.id === "ticket-payment-form") updateCheckout(event.target.form);
 });
 document.addEventListener("submit",event => {
   if (!(event.target instanceof HTMLFormElement)) return;

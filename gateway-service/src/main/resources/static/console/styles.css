@@ -301,3 +301,7 @@ hr { border: 0; width: 100%; height: 1px; background: var(--border); margin: 2px
   .concert-summary { padding: 12px 12px 4px; }
   .ticket-offers { padding: 10px 12px 12px; }
 }
+
+.checkout-event { margin-top: 12px; }
+.checkout-note { margin: 9px 0 15px; }
+.checkout-total { display:flex; justify-content:space-between; align-items:center; margin:16px 0; padding:13px; border-radius:9px; background:#f2efff; color:#4432c3; font-weight:700; }
