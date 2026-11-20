@@ -74,7 +74,7 @@ public class IdentityStore {
                 """, UUID.randomUUID().toString(), tenant.toString(), username, hash, role.name());
     }
 
-    public enum Role { ADMIN, OPERATOR, VIEWER }
+    public enum Role { ADMIN, OPERATOR, VIEWER, BUYER }
 
     record Account(UUID id, UUID tenantId, String username, String passwordHash, Role role,
                    boolean enabled, int tokenVersion) {

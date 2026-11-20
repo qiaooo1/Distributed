@@ -17,12 +17,14 @@ import reactor.core.publisher.Mono;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Component
 public class RequestPolicyFilter implements WebFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(RequestPolicyFilter.class);
     private static final String REQUEST_ID = "X-Request-Id";
+    private static final Pattern RESERVATION_PATH = Pattern.compile("/api/tickets/events/[^/]+/reservations/?");
     private static final RedisScript<Long> INCREMENT = RedisScript.of("""
             local count = redis.call('INCR', KEYS[1])
             if count == 1 then redis.call('EXPIRE', KEYS[1], 61) end
@@ -32,15 +34,18 @@ public class RequestPolicyFilter implements WebFilter, Ordered {
     private final ReactiveStringRedisTemplate redis;
     private final int limit;
     private final int loginLimit;
+    private final int ticketLimit;
 
     public RequestPolicyFilter(ReactiveStringRedisTemplate redis, @Value("${joblab.rate-limit}") int limit,
-                               @Value("${joblab.login-rate-limit}") int loginLimit) {
-        if (limit < 1 || loginLimit < 1) {
+                               @Value("${joblab.login-rate-limit}") int loginLimit,
+                               @Value("${joblab.ticket-rate-limit:300}") int ticketLimit) {
+        if (limit < 1 || loginLimit < 1 || ticketLimit < 1) {
             throw new IllegalArgumentException("Job rate limit must be positive");
         }
         this.redis = redis;
         this.limit = limit;
         this.loginLimit = loginLimit;
+        this.ticketLimit = ticketLimit;
     }
 
     @Override
@@ -53,18 +58,20 @@ public class RequestPolicyFilter implements WebFilter, Ordered {
         String path = request.getPath().pathWithinApplication().value();
         boolean login = "/api/auth/token".equals(path);
         boolean submit = "/api/jobs".equals(path) || "/api/jobs/".equals(path);
-        if (!HttpMethod.POST.equals(request.getMethod()) || (!login && !submit)) {
+        boolean reserve = RESERVATION_PATH.matcher(path).matches();
+        if (!HttpMethod.POST.equals(request.getMethod()) || (!login && !submit && !reserve)) {
             return chain.filter(forwarded);
         }
 
         long now = Instant.now().getEpochSecond();
-        int capacity = login ? loginLimit : limit;
-        String prefix = login ? "joblab:login:" + remoteAddress(exchange) + ":" : "joblab:submit:";
+        int capacity = login ? loginLimit : reserve ? ticketLimit : limit;
+        String prefix = login ? "joblab:login:" + remoteAddress(exchange) + ":"
+                : reserve ? "joblab:ticket-reserve:" : "joblab:submit:";
         String key = prefix + now / 60;
         return redis.execute(INCREMENT, List.of(key), List.of()).single()
                 .onErrorResume(ex -> {
                     log.warn("Redis rate limiter unavailable for request {}", requestId);
-                    return Mono.just(login ? -1L : 0L);
+                    return Mono.just(login || reserve ? -1L : 0L);
                 })
                 .flatMap(count -> {
                     if (count < 0) {

@@ -7,6 +7,7 @@
 | VIEWER | 读取本租户任务、报表、周期调度和状态概览 |
 | OPERATOR | VIEWER 权限，加上提交、取消、重放和管理周期调度 |
 | ADMIN | OPERATOR 权限，加上管理本租户账号和审计查询 |
+| BUYER | 查看本租户演出、抢票和查看自己的锁票记录 |
 
 ## 身份与成员
 
@@ -45,6 +46,10 @@ POST /api/schedules 创建，PUT /api/schedules/{id} 替换定义。请求体示
 使用含秒的 Spring Cron 和 IANA 时区。秒字段支持 0、15、30、45 的组合及 */15、*/30。lookbackDays 支持 1–31，统计窗口为执行对应本地日期之前的完整自然日。超过补偿阈值后，SKIP 直接前移调度时刻，FIRE_ONCE 对这一段迟到调度最多补跑一次。ALLOW 允许同一规则的多个任务等待或执行，SKIP_IF_ACTIVE 在上一轮仍待执行或运行时跳过本轮。
 
 PUT /api/schedules/{id}/state 接收 enabled 布尔值，暂停后不再生成新任务，已生成的任务可从任务接口独立取消。恢复时根据当前时间计算下次触发。GET /api/schedules 支持 afterName 与 limit，列表返回 nextAfterName 游标。
+
+## 演出票务
+
+场次、抢票与本人锁票查询位于 `/api/tickets`。权限、锁票状态和请求字段见 [票务接口](concert-platform.md#第一阶段)。
 
 ## 审计与网关反馈
 

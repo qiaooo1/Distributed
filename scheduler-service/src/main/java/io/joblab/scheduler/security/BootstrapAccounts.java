@@ -39,12 +39,14 @@ class BootstrapAccounts implements ApplicationRunner {
             String adminHash = passwords.encode(password);
             String operatorHash = passwords.encode(password);
             String viewerHash = passwords.encode(password);
+            String buyerHash = passwords.encode(password);
             String globexHash = passwords.encode(password);
             transaction.executeWithoutResult(status -> {
                 accounts.seedTenant(GLOBEX, "globex", 2);
                 accounts.seedAccount(ACME, "admin", adminHash, Role.ADMIN);
                 accounts.seedAccount(ACME, "operator", operatorHash, Role.OPERATOR);
                 accounts.seedAccount(ACME, "viewer", viewerHash, Role.VIEWER);
+                accounts.seedAccount(ACME, "buyer", buyerHash, Role.BUYER);
                 accounts.seedAccount(GLOBEX, "admin", globexHash, Role.ADMIN);
             });
         } else if (!bootstrapPassword.isEmpty()) {

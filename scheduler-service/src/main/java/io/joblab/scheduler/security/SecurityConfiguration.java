@@ -78,6 +78,11 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/token", "/internal/jobs/*/claim",
                                 "/internal/jobs/*/heartbeat", "/internal/jobs/*/complete").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/readiness", "/actuator/prometheus").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/tickets/events/*/reservations")
+                                .hasAnyRole("ADMIN", "OPERATOR", "BUYER")
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/jobs", "/api/jobs/**", "/api/schedules", "/api/schedules/**", "/api/operations/**")
+                                .hasAnyRole("ADMIN", "OPERATOR", "VIEWER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(server -> server.jwt(settings -> settings.jwtAuthenticationConverter(jwt -> {

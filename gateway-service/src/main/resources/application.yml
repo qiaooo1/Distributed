@@ -21,7 +21,7 @@ spring:
             - id: scheduler
               uri: lb://scheduler-service
               predicates:
-                - Path=/api/auth/token,/api/jobs,/api/jobs/**,/api/schedules,/api/schedules/**,/api/admin/members,/api/admin/members/**,/api/operations/**
+                - Path=/api/auth/token,/api/jobs,/api/jobs/**,/api/schedules,/api/schedules/**,/api/admin/members,/api/admin/members/**,/api/operations/**,/api/tickets/**
               filters:
                 - RemoveRequestHeader=X-JobLab-Internal-Key
                 - DedupeResponseHeader=X-Request-Id, RETAIN_FIRST
@@ -43,6 +43,7 @@ eureka:
 joblab:
   rate-limit: ${JOB_RATE_LIMIT:60}
   login-rate-limit: ${JOB_LOGIN_RATE_LIMIT:30}
+  ticket-rate-limit: ${TICKET_RATE_LIMIT:300}
 
 management:
   health:

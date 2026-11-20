@@ -1,5 +1,6 @@
 import { ApiError, openApi, request } from "./api.js";
 import { action, audits, escape, jobs, layout, loginView, members, overview, pages, roles, schedules, states } from "./views.js";
+import { ticketError, ticketEvents, ticketForm, ticketOrders, updateTicketTimers } from "./concert.js";
 import { confirmDialog, dialogHead, jobDetails, jobForm, memberForm, scheduleDetails, scheduleForm } from "./forms.js";
 
 const app = document.querySelector("#app");
@@ -20,6 +21,8 @@ let nextCursor = null;
 let currentRows = [];
 let modalAction = null;
 let modalSequence = 0;
+let currentConcerts = [];
+let ticketClockOffset = 0;
 
 function readSession() {
   try {
@@ -39,7 +42,9 @@ function toast(text, error = false) {
   toasts.append(node);
   setTimeout(() => node.remove(), 4700);
 }
-const canEdit = () => session && session.role !== "VIEWER";
+const canEdit = () => ["ADMIN","OPERATOR"].includes(session?.role);
+const canBuy = () => canEdit() || session?.role === "BUYER";
+const ticketPage = page => page === "tickets" || page === "ticket-orders";
 const canAdmin = () => session?.role === "ADMIN";
 const failure = error => error instanceof Error ? error.message : "操作失败，请稍后重试。";
 const idempotencyKey = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),
@@ -50,9 +55,11 @@ function resetCursor() {
   cursorIndex = 0;
   nextCursor = null;
   currentRows = [];
+  currentConcerts = [];
 }
 function activeRoute() {
   const value = location.hash.slice(1);
+  if (session.role === "BUYER") return ticketPage(value) ? value : "tickets";
   if (!Object.hasOwn(pages, value) || (!canAdmin() && ["audit","members"].includes(value))) return "overview";
   return value;
 }
@@ -98,7 +105,7 @@ function enterDemo() {
   const params = new URL(location.href).searchParams;
   const selected = params.get("role");
   const role = Object.hasOwn(roles, selected) ? selected : "ADMIN";
-  const username = { ADMIN:"admin", OPERATOR:"operator", VIEWER:"viewer" }[role];
+  const username = { ADMIN:"admin", OPERATOR:"operator", VIEWER:"viewer", BUYER:"buyer" }[role];
   setSession({ demo: true, username, tenant: "acme", role });
 }
 function closeDialog() {
@@ -147,10 +154,20 @@ async function loadPage(quiet = false) {
     let response;
     if (view === "overview") {
       response = await Promise.all([active.overview(), active.jobs({limit:5})]);
+    } else if (ticketPage(view)) {
+      response = view === "tickets" ? await active.ticketEvents() : await active.ticketOrders();
     } else {
       response = await active[view]({ state:filter, cursor, limit:pageLimit });
     }
     if (current !== loadVersion) return;
+    if (ticketPage(view)) {
+      const serverTime = Date.parse(response.serverTime);
+      if (Number.isFinite(serverTime)) ticketClockOffset = serverTime - Date.now();
+      if (view === "tickets") currentConcerts = response.events;
+      host.innerHTML = view === "tickets" ? ticketEvents(currentConcerts,canBuy()) : ticketOrders(response.items);
+      updateTicketTimers(ticketClockOffset);
+      return;
+    }
     if (view === "overview") {
       host.innerHTML = overview(response[0],response[1].items);
       return;
@@ -246,7 +263,11 @@ async function submit(form) {
       return;
     }
     let message;
-    if (form.id === "new-job-form" && canEdit()) {
+    if (form.id === "ticket-reserve-form" && modalAction && canBuy()) {
+      form.dataset.key ||= idempotencyKey();
+      const result = await modalAction(form.dataset.key);
+      message = result.reservation.state === "LOCKED" ? "抢票成功，已锁票 5 分钟。" : "已经找到这次抢票记录。";
+    } else if (form.id === "new-job-form" && canEdit()) {
       form.dataset.key ||= idempotencyKey();
       await api.createJob(fields,form.dataset.key);
       message = "任务已提交。";
@@ -265,7 +286,9 @@ async function submit(form) {
     if (version !== accountVersion) return;
     if (sequence === modalSequence) closeDialog();
     toast(message);
-    if (form.id === "new-job-form") {
+    if (form.id === "ticket-reserve-form") {
+      openPage("ticket-orders",true);
+    } else if (form.id === "new-job-form") {
       jobFilter = "";
       openPage("jobs",true);
     } else {
@@ -274,7 +297,8 @@ async function submit(form) {
   } catch (error) {
     if (version !== accountVersion) return;
     if (form.id !== "login-form" && handleExpired(error,version)) return;
-    const message = form.id === "login-form" && error.status === 401 ? "登录失败，请核对租户、用户名和密码。" : failure(error);
+    const message = form.id === "login-form" && error.status === 401 ? "登录失败，请核对租户、用户名和密码。"
+      : form.id === "ticket-reserve-form" ? ticketError(error) : failure(error);
     if (form.isConnected) showFormError(form,message);
     else toast(message,true);
   } finally {
@@ -306,9 +330,10 @@ function confirm(actionId, value) {
 function click(actionId, value, button) {
   switch (actionId) {
     case "demo": enterDemo(); break;
-    case "fill-demo": {
+    case "fill-demo":
+    case "fill-buyer": {
       const form = document.querySelector("#login-form");
-      for (const [name, field] of Object.entries({tenant:"acme",username:"operator",password:"JobLab-Demo-2026!"})) {
+      for (const [name, field] of Object.entries({tenant:"acme",username:actionId === "fill-buyer" ? "buyer" : "operator",password:"JobLab-Demo-2026!"})) {
         form.elements.namedItem(name).value = field;
       }
       form.querySelector('button[type="submit"]').focus();
@@ -320,6 +345,16 @@ function click(actionId, value, button) {
       break;
     }
     case "logout": logout(); break;
+    case "ticket-list": openPage("tickets"); break;
+    case "ticket-buy": {
+      const event = currentConcerts.find(item => item.offers.some(offer => offer.id === value));
+      const offer = event?.offers.find(item => item.id === value);
+      if (canBuy() && event && offer) {
+        const active = api;
+        showModal(ticketForm(event,offer), key => active.reserveTicket(event.id,offer.id,key));
+      }
+      break;
+    }
     case "refresh": if (session) loadPage(); break;
     case "filter-jobs":
       jobFilter = Object.hasOwn(states,value) ? value : "";
@@ -384,8 +419,10 @@ window.addEventListener("hashchange",() => { if (location.hash !== "#content") c
 setInterval(() => {
   if (!session) return;
   if (!session.demo && Date.now() >= session.expiresAt) { logout("会话已过期，请重新登录。"); return; }
-  if (!document.hidden && !dialog.open && ["overview","jobs"].includes(route)) loadPage(true);
+  if (!document.hidden && !dialog.open && ["overview","jobs","tickets","ticket-orders"].includes(route)) loadPage(true);
 },7000);
+
+setInterval(() => { if (route === "ticket-orders") updateTicketTimers(ticketClockOffset); },1000);
 
 if (new URL(location.href).searchParams.get("demo") === "1") enterDemo();
 else if (session) changeRoute();

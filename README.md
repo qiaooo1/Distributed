@@ -52,13 +52,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-enterprise.
 | `http://127.0.0.1:18761` | Eureka 实例列表 |
 | `http://127.0.0.1:15683` | RabbitMQ 管理台，演示用户 `joblab`，密码 `rabbit_local` |
 
-默认演示租户 `acme` 提供 `admin`、`operator` 和 `viewer` 三种账户，`globex` 提供独立的 `admin`。演示账户密码均为 `JobLab-Demo-2026!`，随 Compose 本地环境初始化。
+默认演示租户 `acme` 提供 `admin`、`operator`、`viewer` 和 `buyer` 四种账户，`globex` 提供独立的 `admin`。演示账户密码均为 `JobLab-Demo-2026!`，随 Compose 本地环境初始化。
 
 ### 浏览器控制台
 
 打开 `http://127.0.0.1:18080/` 后，使用租户账号登录。控制台提供任务总览、任务筛选及分页、执行详情与 CSV 下载、Cron 规则管理、成员和审计。只读成员可以查看本租户的数据，运营可管理任务和周期规则，管理员还可管理成员与查看审计。
 
 控制台随网关 JAR 一起打包，调用同源 API，无需单独启动前端进程。登录页也提供标记为「演示数据」的工作区，便于在浏览器里查看页面和试用交互。
+
+### 演唱会抢票
+
+以 `acme / buyer` 登录后，打开「演出购票」，选择在售场次和票档。抢到后可在「我的票」看到订单编号和 5 分钟锁票倒计时。锁票超时后库存自动恢复。管理员和运营账号也可试抢，购票账号只进入票务工作区。整体方案、接口和后续阶段见 [演唱会票务与周边履约](docs/concert-platform.md)。
 
 ### 用 PowerShell 提交一份报表
 

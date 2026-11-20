@@ -1,4 +1,5 @@
 import { demoApi } from "./demo.js";
+import { openTicketDemo } from "./concert-demo.js";
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -38,8 +39,10 @@ export async function request(path, { method = "GET", token, body, key, download
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       const detail = payload?.detail;
-      throw new ApiError(response.status, statusMessages[response.status] ||
+      const error = new ApiError(response.status, statusMessages[response.status] ||
         (typeof detail === "string" ? detail : "请求失败，请稍后重试。"));
+      error.detail = typeof detail === "string" ? detail : null;
+      throw error;
     }
     if (download) return await response.blob();
     if (response.status === 204) return null;
@@ -59,13 +62,17 @@ const query = (path, params) => {
 };
 
 export function openApi(session) {
-  if (session.demo) return demoApi(session);
+  if (session.demo) return { ...demoApi(session), ...openTicketDemo(session) };
   const call = (path, options) => request(path, { ...options, token: session.accessToken });
   const jobs = "/api/jobs";
   const schedules = "/api/schedules";
   const members = "/api/admin/members";
   const item = (path, id) => path + "/" + encodeURIComponent(id);
   return {
+    ticketEvents: () => call("/api/tickets/events"),
+    ticketOrders: () => call("/api/tickets/reservations"),
+    reserveTicket: (eventId, offerId, key) => call(item("/api/tickets/events", eventId) + "/reservations",
+      { method: "POST", body: { offerId }, key }),
     overview: () => call("/api/operations/overview"),
     jobs: ({ state, cursor, limit }) => call(query(jobs, { state, cursor, limit })),
     job: id => call(item(jobs, id)),

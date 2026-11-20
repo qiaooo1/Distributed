@@ -20,6 +20,7 @@ const paths = {
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 1 1 8 0v4m-4 4v2"/>',
   queue: '<path d="M3 6h18M3 12h13M3 18h8"/><circle cx="19" cy="17" r="3"/>',
+  ticket: '<path d="M4 5h16a2 2 0 0 1 2 2v2a3 3 0 0 0 0 6v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 1 2-2Zm11 2v2m0 2v2m0 2v2"/>',
   dot: '<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>',
 };
 export const icon = (name, size = 18) => '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[name] + '</svg>';
@@ -44,10 +45,12 @@ export const states = {
   CANCELLED: { label: "已取消", tone: "slate", color: "#aab3c7", icon: "pause" },
 };
 export const reports = { DAILY_TOTALS: "销售日报汇总", SALES_DETAIL: "销售订单明细" };
-export const roles = { ADMIN: "管理员", OPERATOR: "运营人员", VIEWER: "只读成员" };
+export const roles = { ADMIN: "管理员", OPERATOR: "运营人员", VIEWER: "只读成员", BUYER: "购票观众" };
 export const MISFIRE = { FIRE_ONCE: "补跑一次", SKIP: "跳过" };
 export const OVERLAP = { SKIP_IF_ACTIVE: "跳过本轮", ALLOW: "允许重叠" };
 export const pages = {
+  tickets: { label: "演出购票", icon: "ticket", description: "选择演出场次和票档，查看余票并发起抢票。" },
+  "ticket-orders": { label: "我的票", icon: "logs", description: "查看自己的锁票记录和剩余保留时间。" },
   overview: { label: "运行总览", icon: "grid", description: "查看当前租户的任务状态、排队情况和近期执行记录。" },
   jobs: { label: "任务管理", icon: "task", description: "提交报表任务，查看执行历史与结果。" },
   schedules: { label: "周期调度", icon: "calendar", description: "管理 Cron 规则、时区与补偿策略。" },
@@ -86,7 +89,8 @@ export function loginView(error = "") {
     '<label class="field">密码<input name="password" type="password" autocomplete="current-password" required></label>' +
     '<p class="form-error" role="alert"' + (error ? "" : " hidden") + ">" + escape(error) + "</p>" +
     '<button class="btn primary" type="submit">登录</button>' +
-    action("填入本地演示账号", "fill-demo", { tone: "ghost" }) + '<hr>' +
+    '<div class="actions">' + action("填入本地演示账号", "fill-demo", { tone: "ghost" }) +
+    action("填入购票演示账号", "fill-buyer", { tone: "ghost" }) + '</div><hr>' +
     action("打开演示工作区", "demo", { symbol: "grid" }) + "</form></main></div>";
 }
 
@@ -99,8 +103,10 @@ export function layout(session, page, mobileOpen) {
   const role = roles[session.role] ?? session.role;
   const badgeIcon = session.demo ? "dot" : "lock";
   return '<div class="workspace"><aside id="sidebar" class="sidebar' + (mobileOpen ? " open" : "") + '">' + brand() + iconButton("关闭菜单", "menu", "close", {className:"mobile-nav sidebar-close"}) +
-    '<nav class="navigation" aria-label="控制台"><p class="nav-label">工作空间</p>' +
-    ["overview","jobs","schedules"].map(id => nav(page,id)).join("") +
+    '<nav class="navigation" aria-label="控制台">' +
+    (session.role === "BUYER" ? "" : '<p class="nav-label">工作空间</p>' +
+      ["overview","jobs","schedules"].map(id => nav(page,id)).join("")) +
+    '<p class="nav-label">演出票务</p>' + ["tickets","ticket-orders"].map(id => nav(page,id)).join("") +
     (session.role === "ADMIN" ? '<p class="nav-label">系统管理</p>' + nav(page,"audit") + nav(page,"members") : "") +
     '</nav><div class="account"><span class="avatar" aria-hidden="true">' + escape(session.username.slice(0,1)) +
     '</span><div class="account-info"><span class="account-name">' + escape(session.username) + '</span><span class="account-role">' +
@@ -117,7 +123,7 @@ export function layout(session, page, mobileOpen) {
 }
 
 const primary = (session, page) => {
-  if (session.role === "VIEWER") return "";
+  if (session.role === "VIEWER" || session.role === "BUYER") return "";
   const options = { tone: "primary", symbol: "add" };
   if (page === "jobs" || page === "overview") return action("新建任务", "new-job", options);
   if (page === "schedules") return action("新建规则", "new-schedule", options);
