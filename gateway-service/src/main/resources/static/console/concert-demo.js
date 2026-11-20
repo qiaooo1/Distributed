@@ -58,9 +58,31 @@ function extras(eventId) {
   return {merchandise:[{id:"demo-scarf",label:"城市回声限定围巾",priceFen:6900},{id:"demo-pin",label:"城市回声徽章",priceFen:2400}],
     pickupPoints:[{id:"demo-east",label:"东门周边取货点"},{id:"demo-west",label:"西门周边取货点"}]};
 }
+function demoFulfillment() {
+  return data.reservations.filter(row => row.state === "PAID" && row.payment?.merchandiseId).map(row => {
+    const createdAt = row.payment.paidAt;
+    const starts = data.events.find(e => e.id === row.eventId).startsAt;
+    const order = {
+      id:row.payment.id,concertTitle:row.eventTitle,merchandiseLabel:row.payment.merchandiseLabel,
+      pickupLabel:row.payment.pickupLabel,warehouseLabel:"星港中转仓",quantity:1,state:"ACCEPTED",note:"ACCEPTED",
+      deadlineAt:new Date(Date.parse(starts)-1800000).toISOString(),createdAt,
+    };
+    const attempts = [
+      {id:row.payment.id+"-a",warehouseLabel:"滨海前置仓",state:"REJECTED",reason:"WAREHOUSE_REJECTED",createdAt},
+      {id:row.payment.id+"-b",warehouseLabel:"星港中转仓",state:"ACCEPTED",reason:"ACCEPTED",createdAt},
+    ];
+    return {order,attempts};
+  });
+}
 export function openTicketDemo(session) {
   data ??= load();
   return {
+    fulfillmentOrders: async () => demoFulfillment().map(item => item.order),
+    fulfillmentOrder: async id => {
+      const item = demoFulfillment().find(value => value.order.id === id);
+      if (!item) throw new Error("找不到这笔演示补货单。");
+      return item;
+    },
     ticketEvents: async () => {
       const now = Date.now();
       update(now);

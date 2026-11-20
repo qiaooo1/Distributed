@@ -1,5 +1,6 @@
 import { ApiError, openApi, request } from "./api.js";
 import { action, audits, escape, jobs, layout, loginView, members, overview, pages, roles, schedules, states } from "./views.js";
+import { fulfillmentDetails, fulfillmentView } from "./concert-fulfillment.js";
 import { checkoutError, checkoutReceipt, checkoutView, updateCheckout } from "./concert-checkout.js";
 import { ticketError, ticketEvents, ticketForm, ticketOrders, updateTicketTimers } from "./concert.js";
 import { confirmDialog, dialogHead, jobDetails, jobForm, memberForm, scheduleDetails, scheduleForm } from "./forms.js";
@@ -61,7 +62,8 @@ function resetCursor() {
 function activeRoute() {
   const value = location.hash.slice(1);
   if (session.role === "BUYER") return ticketPage(value) ? value : "tickets";
-  if (!Object.hasOwn(pages, value) || (!canAdmin() && ["audit","members"].includes(value))) return "overview";
+  if (!Object.hasOwn(pages, value) || (!canAdmin() && ["audit","members"].includes(value)) ||
+      (value === "fulfillment" && !canEdit())) return "overview";
   return value;
 }
 function setHash(value) {
@@ -157,10 +159,16 @@ async function loadPage(quiet = false) {
       response = await Promise.all([active.overview(), active.jobs({limit:5})]);
     } else if (ticketPage(view)) {
       response = view === "tickets" ? await active.ticketEvents() : await active.ticketOrders();
+    } else if (view === "fulfillment") {
+      response = await active.fulfillmentOrders();
     } else {
       response = await active[view]({ state:filter, cursor, limit:pageLimit });
     }
     if (current !== loadVersion) return;
+    if (view === "fulfillment") {
+      host.innerHTML = fulfillmentView(response);
+      return;
+    }
     if (ticketPage(view)) {
       const serverTime = Date.parse(response.serverTime);
       if (Number.isFinite(serverTime)) ticketClockOffset = serverTime - Date.now();
@@ -352,6 +360,20 @@ async function showCheckout(id) {
     showModal(dialogHead("加载失败") + '<div class="dialog-main"><p role="alert">' + escape(failure(error)) + '</p></div>');
   }
 }
+async function showFulfillment(id) {
+  if (!canEdit()) return;
+  const active = api;
+  const version = accountVersion;
+  showModal(dialogHead("补货单详情") + '<p class="loading" role="status">正在加载回执…</p>');
+  const sequence = modalSequence;
+  try {
+    const row = await active.fulfillmentOrder(id);
+    if (sequence === modalSequence && version === accountVersion && dialog.open) showModal(fulfillmentDetails(row));
+  } catch (error) {
+    if (sequence !== modalSequence || handleExpired(error,version)) return;
+    showModal(dialogHead("加载失败") + '<div class="dialog-main"><p role="alert">' + escape(failure(error)) + '</p></div>');
+  }
+}
 function click(actionId, value, button) {
   switch (actionId) {
     case "demo": enterDemo(); break;
@@ -372,6 +394,7 @@ function click(actionId, value, button) {
     case "logout": logout(); break;
     case "ticket-list": openPage("tickets"); break;
     case "ticket-checkout": showCheckout(value); break;
+    case "fulfillment-detail": showFulfillment(value); break;
     case "ticket-buy": {
       const event = currentConcerts.find(item => item.offers.some(offer => offer.id === value));
       const offer = event?.offers.find(item => item.id === value);
@@ -448,7 +471,7 @@ window.addEventListener("hashchange",() => { if (location.hash !== "#content") c
 setInterval(() => {
   if (!session) return;
   if (!session.demo && Date.now() >= session.expiresAt) { logout("会话已过期，请重新登录。"); return; }
-  if (!document.hidden && !dialog.open && ["overview","jobs","tickets","ticket-orders"].includes(route)) loadPage(true);
+  if (!document.hidden && !dialog.open && ["overview","jobs","tickets","ticket-orders","fulfillment"].includes(route)) loadPage(true);
 },7000);
 
 setInterval(() => { if (route === "ticket-orders") updateTicketTimers(ticketClockOffset); },1000);

@@ -51,6 +51,7 @@ export const OVERLAP = { SKIP_IF_ACTIVE: "跳过本轮", ALLOW: "允许重叠" }
 export const pages = {
   tickets: { label: "演出购票", icon: "ticket", description: "选择演出场次和票档，查看余票并发起抢票。" },
   "ticket-orders": { label: "我的票", icon: "logs", description: "查看自己的锁票记录和剩余保留时间。" },
+  fulfillment: { label: "周边派单", icon: "building", description: "查看取货点的补货单、处理进度和仓库回执。" },
   overview: { label: "运行总览", icon: "grid", description: "查看当前租户的任务状态、排队情况和近期执行记录。" },
   jobs: { label: "任务管理", icon: "task", description: "提交报表任务，查看执行历史与结果。" },
   schedules: { label: "周期调度", icon: "calendar", description: "管理 Cron 规则、时区与补偿策略。" },
@@ -107,6 +108,7 @@ export function layout(session, page, mobileOpen) {
     (session.role === "BUYER" ? "" : '<p class="nav-label">工作空间</p>' +
       ["overview","jobs","schedules"].map(id => nav(page,id)).join("")) +
     '<p class="nav-label">演出票务</p>' + ["tickets","ticket-orders"].map(id => nav(page,id)).join("") +
+    (["ADMIN","OPERATOR"].includes(session.role) ? nav(page,"fulfillment") : "") +
     (session.role === "ADMIN" ? '<p class="nav-label">系统管理</p>' + nav(page,"audit") + nav(page,"members") : "") +
     '</nav><div class="account"><span class="avatar" aria-hidden="true">' + escape(session.username.slice(0,1)) +
     '</span><div class="account-info"><span class="account-name">' + escape(session.username) + '</span><span class="account-role">' +

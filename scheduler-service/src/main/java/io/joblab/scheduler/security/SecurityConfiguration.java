@@ -77,6 +77,9 @@ public class SecurityConfiguration {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/token", "/internal/jobs/*/claim",
                                 "/internal/jobs/*/heartbeat", "/internal/jobs/*/complete").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/internal/concert-dispatch/claim",
+                                "/internal/concert-dispatch/receipts", "/internal/concert-dispatch/complete").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/internal/concert-dispatch/receipts/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/readiness", "/actuator/prometheus").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/tickets/events/*/reservations", "/api/tickets/reservations/*/payments")
                                 .hasAnyRole("ADMIN", "OPERATOR", "BUYER")

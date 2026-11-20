@@ -69,6 +69,8 @@ export function openApi(session) {
   const members = "/api/admin/members";
   const item = (path, id) => path + "/" + encodeURIComponent(id);
   return {
+    fulfillmentOrders: () => call("/api/operations/concert-fulfillment/orders"),
+    fulfillmentOrder: id => call(item("/api/operations/concert-fulfillment/orders",id)),
     ticketEvents: () => call("/api/tickets/events"),
     ticketOrders: () => call("/api/tickets/reservations"),
     ticketCheckout: id => call(item("/api/tickets/reservations",id) + "/checkout"),

@@ -4,10 +4,10 @@
 
 | 角色 | 权限 |
 | --- | --- |
-| VIEWER | 读取本租户任务、报表、周期调度和状态概览 |
-| OPERATOR | VIEWER 权限，加上提交、取消、重放和管理周期调度 |
+| VIEWER | 读取本租户任务、报表、周期调度、状态概览和演出场次 |
+| OPERATOR | VIEWER 权限，加上提交、取消、重放、管理周期调度、购票和查询周边补货单 |
 | ADMIN | OPERATOR 权限，加上管理本租户账号和审计查询 |
-| BUYER | 查看本租户演出、抢票和查看自己的锁票记录 |
+| BUYER | 查看本租户演出，抢票、模拟支付和查看本人订单与付款回执 |
 
 ## 身份与成员
 
@@ -47,9 +47,11 @@ POST /api/schedules 创建，PUT /api/schedules/{id} 替换定义。请求体示
 
 PUT /api/schedules/{id}/state 接收 enabled 布尔值，暂停后不再生成新任务，已生成的任务可从任务接口独立取消。恢复时根据当前时间计算下次触发。GET /api/schedules 支持 afterName 与 limit，列表返回 nextAfterName 游标。
 
-## 演出票务
+## 演出票务与周边补货
 
-场次、抢票与本人锁票查询位于 `/api/tickets`。权限、锁票状态和请求字段见 [票务接口](concert-platform.md#第一阶段)。
+场次、抢票、本人订单与结算位于 `/api/tickets`。创建锁票与确认支付各自要求 `Idempotency-Key`。模拟付款回执按分返回票价、周边价与总金额。
+
+管理员和运营可通过 `GET /api/operations/concert-fulfillment/orders` 查询本租户补货单，通过 `GET /api/operations/concert-fulfillment/orders/{id}` 查看详情和回执记录。路由、请求参数和权限见 [票务与派单接口](concert-platform.md#接口与权限)。
 
 ## 审计与网关反馈
 
